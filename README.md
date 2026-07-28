@@ -1,31 +1,31 @@
-# 🌡️ Proaktive Raumklima- & Schimmel-Prävention (End-to-End ML Pipeline)
+# 🌡️ Proactive Indoor Climate & Mold Prevention (End-to-End ML Pipeline)
 
-Anstatt im Smart Home reaktiv auf hohe Luftfeuchtigkeit zu reagieren (wenn es bereits zu spät ist), sagt dieses End-to-End-Projekt das Raumklima **proaktiv für die nächste Stunde voraus**.
+Instead of reactively responding to high humidity in a smart home (when it's already too late), this end-to-end project proactively forecasts room climate **for the next hour**.
 
-Durch die Kombination von historischen IoT-Sensordaten (TimescaleDB), externen Wetterprognosen (Open-Meteo API) und physikalischen Berechnungen liefert ein **LightGBM-Modell** präzise Lüftungsempfehlungen zur Schimmelprävention – insbesondere für kritische Räume wie kalte Keller im Sommer.
-
----
-
-## 🎯 Funktionalitäten
-
-1. **Automatisierte Wetter-Ingestion:** Regelmäßiges Abrufen von Wetterprognosen (Temperatur, relative Feuchte, Sonnenstrahlung) über die Open-Meteo API und Verknüpfung mit internen Smart-Home-Daten.
-2. **Physikalisches Feature Engineering:** Berechnung der **absoluten Luftfeuchtigkeit ($g/m^3$)** mittels der Magnus-Formel für Sättigungsdampfdruck. Dies ist entscheidend, um den tatsächlichen Wassergehalt der Luft physikalisch korrekt zwischen Innen- und Außenbereich zu vergleichen.
-3. **ML-gestützte Zeitreihen-Prognose:** Ein LightGBM-Regressor prognostiziert die Temperaturentwicklung und Feuchtigkeitsdrift des Raumes für den Horizont von $+1$ Stunde ohne Lüftung.
-4. **Intelligente Lüftungs-Empfehlungen:**
-   - _Schimmel-Schutz:_ Warnung und Lüftungsempfehlung, sobald die prognostizierte Feuchtigkeit kritische Grenzwerte überschreitet.
-   - _Sommer-Kondensationsschutz:_ Automatische Sperre der Lüftungsempfehlung für kalte Keller- oder Erdgeschossräume, wenn warme, feuchte Außenluft an kalten Wänden kondensieren würde (Taupunkt-Unterschreitung).
+By combining historical IoT sensor data (TimescaleDB), external weather forecasts (Open-Meteo API), and thermodynamic calculations, a **LightGBM model** delivers precise ventilation recommendations to prevent mold—especially in critical areas like cold basements during humid summer months.
 
 ---
 
-## 🏗️ System-Architektur & Tech Stack
+## 🎯 Core Features & Functionality
 
-Das Projekt setzt auf moderne Data-Engineering- und MLOps-Standards:
+1. **Automated Weather Ingestion:** Periodic retrieval of weather forecasts (temperature, relative humidity, direct solar radiation) via the Open-Meteo API, joined seamlessly with internal smart home telemetry.
+2. **Thermodynamic Feature Engineering:** Calculation of **absolute humidity ($\text{g/m}^3$)** using the Magnus formula for saturation vapor pressure. This is essential for physically comparing moisture content between indoor and outdoor air environments.
+3. **ML Time-Series Forecasting:** A LightGBM regressor predicts room temperature trends and humidity drift for a $+1$ hour horizon without active ventilation.
+4. **Intelligent Ventilation Alerts:**
+   - _Mold Prevention:_ Proactive alerts and ventilation recommendations whenever forecasted indoor humidity exceeds safety thresholds.
+   - _Summer Condensation Shield:_ Automatic suppression of ventilation advice for cold basement or ground-floor rooms when warm, humid outdoor air would condense against cold masonry (dew point drop).
 
-- **Event Broker & Ingestion:** [Redpanda](https://redpanda.com/) & Redpanda Connect für hochperformantes Streaming der Sensor-Events aus dem Smart Home.
-- **Database & Storage:** [TimescaleDB](https://www.timescale.com/) (PostgreSQL-Erweiterung) für die Speicherung von Zeitreihendaten auf Hypertables.
-- **Orchestration:** [Apache Airflow](https://airflow.apache.org/) zur zyklischen Steuerung der Data Pipeline (Ingestion -> Feature Engineering -> Training -> Vorhersage).
-- **High-Performance Processing:** [Polars](https://pola.rs/) für blitzschnelles, speichereffizientes DataFrame-Handling, Window-Lags und Sensor-Bereinigungen (`Forward-Fill` für unregelmäßige Zigbee-Signale).
-- **Machine Learning:** [LightGBM](https://lightgbm.readthedocs.io/) & Scikit-Learn für Gradient-Boosting-Regression unter Berücksichtigung historischer Lags und Solarstrahlung.
+---
+
+## 🏗️ System Architecture & Tech Stack
+
+Built in alignment with modern Data Engineering and MLOps industry standards:
+
+- **Event Broker & Ingestion:** [Redpanda](https://redpanda.com/) & Redpanda Connect for high-throughput streaming of IoT sensor events.
+- **Database & Storage:** [TimescaleDB](https://www.timescale.com/) (PostgreSQL extension) for time-series hypertable management.
+- **Orchestration:** [Apache Airflow](https://airflow.apache.org/) for scheduling cyclic pipeline runs (Ingestion -> Feature Engineering -> Training -> Inference).
+- **High-Performance Processing:** [Polars](https://pola.rs/) for lightning-fast, memory-efficient DataFrame transformations, window lags, and data imputation (`Forward-Fill` for irregular Zigbee transmissions).
+- **Machine Learning:** [LightGBM](https://lightgbm.readthedocs.io/) & Scikit-Learn for gradient boosting regression incorporating solar radiation and temporal lags.
 
 ```text
 [Smart Home Sensors] -> (MQTT/Redpanda) -> [TimescaleDB]
@@ -33,5 +33,5 @@ Das Projekt setzt auf moderne Data-Engineering- und MLOps-Standards:
 [Open-Meteo API] ------------------------------►├─► [Polars Feature Engineering]
                                                 │            │
                                                 ▼            ▼
-                                    [Airflow DAGs] ◄─ [LightGBM Model] ─► [Lüftungs-Alerts]
+                                    [Airflow DAGs] ◄─ [LightGBM Model] ─► [Ventilation Alerts]
 ```

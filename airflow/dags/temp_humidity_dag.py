@@ -18,7 +18,7 @@ DB_URL = os.getenv("DATABASE_URL")
 if not DB_URL:
     raise ValueError("FATAL: DATABASE_URL wurde nicht in den Umgebungsvariablen gefunden!")
 
-# 2. SQLAlchemy-URL dynamisch ableiten (ersetzt den Präfix sauber)
+# 2. SQLAlchemy-URL dynamisch ableiten
 SQL_ALCHEMY_URL = DB_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 default_args = {
