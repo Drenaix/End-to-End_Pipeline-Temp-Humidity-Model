@@ -12,3 +12,10 @@ ipython_config.py
 # Remove previous ipynb_checkpoints
 #   git rm -r .ipynb_checkpoints/
 
+.env
+*.env
+.env.*
+!.env.example
+
+.DS_Store
+.*.DS_Store

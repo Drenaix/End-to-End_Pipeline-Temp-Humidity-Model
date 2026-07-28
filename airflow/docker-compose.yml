@@ -1,0 +1,113 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 1. AIRFLOW METADATENBANK (Isoliert von deiner TimescaleDB!)
+  # ---------------------------------------------------------------------------
+  postgres-airflow:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${AIRFLOW_DB_USER:-airflow}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:-airflow_default_secret}
+      POSTGRES_DB: ${AIRFLOW_DB_NAME:-airflow}
+    volumes:
+      - postgres-airflow-vol:/var/lib/postgresql/data
+    networks:
+      - airflow-internal
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${AIRFLOW_DB_USER:-airflow}"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # 2. INITIALISIERUNG (Installiert Polars, LightGBM & Co. beim Start)
+  # ---------------------------------------------------------------------------
+  airflow-init:
+    image: apache/airflow:2.9.2-python3.10
+    command: version
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:-airflow_default_secret}@postgres-airflow/${AIRFLOW_DB_NAME:-airflow}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      _AIRFLOW_DB_UPGRADE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin_secure_pass_change_me!}
+      _PIP_ADDITIONAL_REQUIREMENTS: polars lightgbm connectorx pyarrow openmeteo-requests requests-cache scikit-learn psycopg2-binary sqlalchemy
+    networks:
+      - airflow-internal
+      - homelab-net
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # 3. WEBSERVER (Deine UI unter Port 8083)
+  # ---------------------------------------------------------------------------
+  airflow-webserver:
+    image: apache/airflow:2.9.2-python3.10
+    command: webserver
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - LGBM_NO_OPENMP=1
+      - _APT_ADDITIONAL_DEPENDENCIES=libgomp1
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:-airflow_default_secret}@postgres-airflow/${AIRFLOW_DB_NAME:-airflow}
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Europe/Berlin
+      - _PIP_ADDITIONAL_REQUIREMENTS=polars lightgbm connectorx pyarrow openmeteo-requests requests-cache scikit-learn psycopg2-binary sqlalchemy
+    ports:
+      - "8083:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+    networks:
+      - airflow-internal
+      - homelab-net
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # 4. SCHEDULER (Der Motor, der alle 12 Stunden deine Prognose berechnet)
+  # ---------------------------------------------------------------------------
+  airflow-scheduler:
+    image: apache/airflow:2.9.2-python3.10
+    command: scheduler
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - LGBM_NO_OPENMP=1
+      - _APT_ADDITIONAL_DEPENDENCIES=libgomp1
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:-airflow_default_secret}@postgres-airflow/${AIRFLOW_DB_NAME:-airflow}
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Europe/Berlin
+      - _PIP_ADDITIONAL_REQUIREMENTS=polars lightgbm connectorx pyarrow openmeteo-requests requests-cache scikit-learn psycopg2-binary sqlalchemy
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+    networks:
+      - airflow-internal
+      - homelab-net
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+# ---------------------------------------------------------------------------
+# NETZWERKE & VOLUMES
+# ---------------------------------------------------------------------------
+volumes:
+  postgres-airflow-vol: null
+
+networks:
+  airflow-internal:
+    internal: true
+  homelab-net:
+    external: true

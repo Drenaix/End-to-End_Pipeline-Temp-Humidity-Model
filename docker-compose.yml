@@ -1,0 +1,191 @@
+# Note: Das 'version'-Attribut ist in modernem Docker Compose v2 veraltet und kann weggelassen werden.
+
+# Das externe Netzwerk für unsere Data Fabric
+networks:
+  data-fabric:
+    external: true
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. TIME-SERIES STORAGE (Das Gedächtnis)
+  # ---------------------------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: timescaledb
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${TIMESCALE_USER:-postgres}
+      POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:-timescale_secret_password}
+      POSTGRES_DB: ${TIMESCALE_DB:-climate_data}
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    networks:
+      - data-fabric
+
+  # ---------------------------------------------------------------------------
+  # 2. DAS POSTAMT (Der Event Broker)
+  # ---------------------------------------------------------------------------
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --mode dev-container
+      - --kafka-addr 0.0.0.0:9092
+      - --advertise-kafka-addr redpanda:9092
+    ports:
+      - "9092:9092"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - data-fabric
+
+  # ---------------------------------------------------------------------------
+  # 3. DAS SCHAUFENSTER (Das UI für den Broker)
+  # ---------------------------------------------------------------------------
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: redpanda-console
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redpanda
+    networks:
+      - data-fabric
+
+  # ---------------------------------------------------------------------------
+  # 4. DER STREAM PROCESSOR (Holt die Daten von MQTT/Sensoren)
+  # ---------------------------------------------------------------------------
+  redpanda-connect:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    container_name: redpanda-connect
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./connect.yaml:/connect.yaml:ro
+    command:
+      - run
+      - /connect.yaml
+    depends_on:
+      - redpanda
+    networks:
+      - data-fabric
+
+  # ---------------------------------------------------------------------------
+  # 5. DER CONSUMER (Schreibt von Kafka in die TimescaleDB)
+  # ---------------------------------------------------------------------------
+  redpanda-connect-pg:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    container_name: redpanda-connect-pg
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./connect-to-postgres.yaml:/connect.yaml:ro
+    command:
+      - run
+      - /connect.yaml
+    depends_on:
+      - redpanda
+      - timescaledb
+    networks:
+      - data-fabric
+
+  # ---------------------------------------------------------------------------
+  # 6. DER TRANSFORMER (Macht aus Roh-JSON saubere SQL-Tabellen via dbt)
+  # ---------------------------------------------------------------------------
+  dbt-transformer:
+    image: python:3.11
+    container_name: dbt-transformer
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DBT_ALLOW_EXPERIMENTAL_ADAPTERS: "true"
+      # Vererbt DB-Zugangsdaten an dbt (für deine profiles.yml)
+      DBT_HOST: timescaledb
+      DBT_USER: ${TIMESCALE_USER:-postgres}
+      DBT_PASSWORD: ${TIMESCALE_PASSWORD:-timescale_secret_password}
+      DBT_DBNAME: ${TIMESCALE_DB:-climate_data}
+    volumes:
+      - /opt/stacks/redpanda/dbt:/usr/app
+    working_dir: /usr/app
+    command: >
+      bash -c "
+      echo '=== Installiere dbt-postgres... ===' &&
+      pip install --quiet --no-cache-dir 'dbt-postgres>=1.8.0,<2.0.0' &&
+      echo '=== Warte 10 Sekunden auf Datenbank... ===' &&
+      sleep 10 &&
+      while true; do
+        echo '=== Starte dbt Transformation ===' &&
+        dbt run &&
+        echo '=== Transformation erfolgreich. Schlafe für 60 Sekunden... ===' &&
+        sleep 60;
+      done
+      "
+    networks:
+      - data-fabric
+
+  # ---------------------------------------------------------------------------
+  # 7. VISUALIZATION (Das Dashboard für den Endanwender)
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana_secret_password}
+    ports:
+      - "3002:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - timescaledb
+    networks:
+      - data-fabric
+
+  # ---------------------------------------------------------------------------
+  # 8. MLOPS ENGINE (Phase 1: JupyterLab Prototyping & Training)
+  # ---------------------------------------------------------------------------
+  ml-lab:
+    image: jupyter/scipy-notebook:latest
+    container_name: ml-lab
+    restart: unless-stopped
+    user: root # Verhindert Berechtigungsprobleme bei lokalen Ordnern
+    env_file:
+      - .env
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-jupyter_default_token_change_me}
+      GRANT_SUDO: "yes"
+      # Damit deine Notebooks sofort wissen, wo die DB liegt:
+      DATABASE_URL: postgresql://${TIMESCALE_USER:-postgres}:${TIMESCALE_PASSWORD:-timescale_secret_password}@timescaledb:5432/${TIMESCALE_DB:-climate_data}
+    ports:
+      - "8890:8888"
+    volumes:
+      - ./ml_workspace:/home/jovyan/work
+    depends_on:
+      - timescaledb
+    networks:
+      - data-fabric
+
+# ---------------------------------------------------------------------------
+# VOLUMES
+# ---------------------------------------------------------------------------
+volumes:
+  timescale_data: null
+  redpanda_data: null
+  grafana_data: null

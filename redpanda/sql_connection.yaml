@@ -1,0 +1,34 @@
+input:
+  kafka:
+    addresses:
+      - "redpanda:9092"
+    topics:
+      - "raw_sensor_events"
+    consumer_group: "timescaledb-writer"
+
+pipeline:
+  processors:
+    - mapping: |
+        root.time = this.timestamp_ingest | now()
+        # 1. Hol den echten Sensornamen aus der Verschachtelung (Fallback auf root)
+        root.sensor_id = this.metrics.sensor_id | this.sensor_id
+        # 2. Zieh das innere "value"-Objekt nach oben, damit dbt es sauber lesen kann
+        root.metric = (this.metrics.metrics | this.metrics).string()
+
+output:
+  sql_insert:
+    driver: postgres
+    # HIER IST DER FIX: Dynamischer Aufbau aus den .env Variablen via ${VAR}
+    dsn: postgres://${TIMESCALE_USER}:${TIMESCALE_PASSWORD}@timescaledb:5432/${TIMESCALE_DB}?sslmode=disable
+    table: sensor_data
+    columns:
+      - time
+      - sensor_id
+      - metric
+    args_mapping: |
+      root = [
+        this.time,
+        this.sensor_id,
+        this.metric
+      ]
+    max_in_flight: 64
